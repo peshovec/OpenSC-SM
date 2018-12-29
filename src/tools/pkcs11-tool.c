@@ -1609,10 +1609,6 @@ static int change_pin(CK_SLOT_ID slot, CK_SESSION_HANDLE sess)
 
 	}
 
-        if (rv != CKR_OK)
-                p11_fatal("C_SetPIN", rv);
-        printf("PIN successfully changed\n");
-
 
 	if (rv != CKR_OK)
 		p11_fatal("C_SetPIN", rv);

@@ -1866,7 +1866,7 @@ iasecc_chv_verify(struct sc_card *card, struct sc_pin_cmd_data *pin_cmd,
 		apdu.data = pin_cmd->pin1.data;
 		apdu.datalen = pin_cmd->pin1.len;
 		apdu.lc = pin_cmd->pin1.len;
-		if (card->type == 25002) { // Idemia IAS-ECC
+		if (card->type == SC_CARD_TYPE_IASECC_OBERTHUR) { // Idemia IAS-ECC
 			sc_log(ctx, "Forcing padded pin length for card (%i)", card->type);
             		memset(pinwithpadding, 0xFF, sizeof(pinwithpadding));
             		memcpy(pinwithpadding, pin_cmd->pin1.data, pin_cmd->pin1.len);
@@ -2384,7 +2384,7 @@ iasecc_pin_change(struct sc_card *card, struct sc_pin_cmd_data *data, int *tries
 		memcpy(pin_data + data->pin1.len, data->pin2.data, data->pin2.len);
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_3_SHORT, 0x24, 0, reference);
 	apdu.datalen = data->pin1.len + data->pin2.len;
-	if (card->type == 25002) { // Idemia IAS-ECC
+	if (card->type == SC_CARD_TYPE_IASECC_OBERTHUR) { // Idemia IAS-ECC
 		sc_log(ctx, "Forcing pins length to be padded for card (%i)", card->type);
 		memset (pin_data,0xFF,sizeof(pin_data));
 		memcpy(pin_data, data->pin1.data, data->pin1.len);
