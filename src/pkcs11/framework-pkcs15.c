@@ -58,7 +58,7 @@ struct pkcs15_slot_data {
 	}                                       \
 	attr->ulValueLen = size;
 
-#define MAX_OBJECTS	64
+#define MAX_OBJECTS	128
 struct pkcs15_fw_data {
 	struct sc_pkcs15_card *		p15_card;
 	struct pkcs15_any_object *	objects[MAX_OBJECTS];
@@ -773,7 +773,7 @@ __pkcs15_create_prkey_object(struct pkcs15_fw_data *fw_data,
 	if (prkey_object != NULL)
 		*prkey_object = (struct pkcs15_any_object *) object;
 
-	return 0;
+	return rv;
 }
 
 
@@ -794,7 +794,7 @@ __pkcs15_create_data_object(struct pkcs15_fw_data *fw_data,
 	if (data_object != NULL)
 		*data_object = (struct pkcs15_any_object *) dobj;
 
-	return 0;
+	return rv;
 }
 
 
@@ -813,7 +813,7 @@ __pkcs15_create_secret_key_object(struct pkcs15_fw_data *fw_data,
 	if (skey_object != NULL)
 		*skey_object = (struct pkcs15_any_object *) skey;
 
-	return 0;
+	return rv;
 }
 
 
@@ -1094,7 +1094,8 @@ pkcs15_init_slot(struct sc_pkcs15_card *p15card, struct sc_pkcs11_slot *slot,
 				/* Trim tokeninfo->label to make right parenthesis visible */
 				char tokeninfo_label[sizeof(p15card->tokeninfo->label)+1];
 				int len;
-				snprintf(tokeninfo_label, sizeof(tokeninfo_label), "%s", p15card->tokeninfo->label);
+				snprintf(tokeninfo_label, sizeof(tokeninfo_label), "%s",
+						p15card->tokeninfo ? p15card->tokeninfo->label : "");
 				tokeninfo_label[sizeof(tokeninfo_label)-1] = '\0';
 				for (len = strlen(tokeninfo_label) - 1; len >= 0 && isspace(tokeninfo_label[len]); len--) {
 					tokeninfo_label[len] = 0;
@@ -1104,12 +1105,14 @@ pkcs15_init_slot(struct sc_pkcs15_card *p15card, struct sc_pkcs11_slot *slot,
 					tokeninfo_label);
 			} else
 				/* The PIN label is empty or says just non-useful "PIN" */
-				snprintf(label, sizeof(label), "%s", p15card->tokeninfo->label);
+				snprintf(label, sizeof(label), "%s",
+						p15card->tokeninfo ? p15card->tokeninfo->label : "");
 			slot->token_info.flags |= CKF_LOGIN_REQUIRED;
 		}
 	}
 	else   {
-		snprintf(label, sizeof(label), "%s", p15card->tokeninfo->label);
+		snprintf(label, sizeof(label), "%s",
+				p15card->tokeninfo ? p15card->tokeninfo->label : "");
 	}
 	strcpy_bp(slot->token_info.label, label, 32);
 
@@ -4603,10 +4606,9 @@ pkcs15_dobj_get_value(struct sc_pkcs11_session *session,
 	if (!out_data)
 		return SC_ERROR_INVALID_ARGUMENTS;
 	if (dobj->info->data.len == 0)
-	/* CKA_VALUE is empty */
+	/* CKA_VALUE is empty we may need to read it */
 	{
 		*out_data = NULL;
-		return sc_to_cryptoki_error(SC_SUCCESS, "C_GetAttributeValue");
 	}
 
 	fw_data = (struct pkcs15_fw_data *) p11card->fws_data[session->slot->fw_data_idx];

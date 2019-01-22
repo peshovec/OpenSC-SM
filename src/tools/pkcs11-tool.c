@@ -269,7 +269,7 @@ static const char *option_help[] = {
 	"Specify the application ID of the data object (use with --type data)",
 	"Specify the issuer in hexadecimal format (use with --type cert)",
 	"Specify the subject in hexadecimal format (use with --type cert/privkey/pubkey)",
-	"Specify the type of object (e.g. cert, privkey, pubkey, data)",
+	"Specify the type of object (e.g. cert, privkey, pubkey, secrkey, data)",
 	"Specify the ID of the object",
 	"Specify the label of the object",
 	"Specify the ID of the slot to use",
@@ -4012,9 +4012,9 @@ get_mechanisms(CK_SLOT_ID slot, CK_MECHANISM_TYPE_PTR *pList, CK_FLAGS flags)
 }
 
 #ifdef ENABLE_OPENSSL
-unsigned char *BIO_copy_data(BIO *out, int *data_lenp) {
+unsigned char *BIO_copy_data(BIO *out, long *data_lenp) {
     unsigned char *data, *tdata;
-    int data_len;
+    long data_len;
 
     data_len = BIO_get_mem_data(out, &tdata);
     data = malloc(data_len+1);
@@ -4121,7 +4121,7 @@ static int read_object(CK_SESSION_HANDLE session)
 	}
 	if (clazz == CKO_PUBLIC_KEY) {
 #ifdef ENABLE_OPENSSL
-		int derlen;
+		long derlen;
 		BIO *pout = BIO_new(BIO_s_mem());
 		if (!pout)
 			util_fatal("out of memory");
@@ -6065,6 +6065,10 @@ static struct mech_info	p11_mechanisms[] = {
       { CKM_DSA_KEY_PAIR_GEN,	"DSA-KEY-PAIR-GEN",	NULL },
       { CKM_DSA,		"DSA",	NULL },
       { CKM_DSA_SHA1,		"DSA-SHA1", NULL },
+      { CKM_DSA_SHA224,		"DSA-SHA224", NULL },
+      { CKM_DSA_SHA256,		"DSA-SHA256", NULL },
+      { CKM_DSA_SHA384,		"DSA-SHA384", NULL },
+      { CKM_DSA_SHA512,		"DSA-SHA512", NULL },
       { CKM_DH_PKCS_KEY_PAIR_GEN,"DH-PKCS-KEY-PAIR-GEN", NULL },
       { CKM_DH_PKCS_DERIVE,	"DH-PKCS-DERIVE", NULL },
       { CKM_X9_42_DH_KEY_PAIR_GEN,"X9-42-DH-KEY-PAIR-GEN", NULL },
@@ -6092,6 +6096,7 @@ static struct mech_info	p11_mechanisms[] = {
       { CKM_DES3_MAC,		"DES3-MAC", NULL },
       { CKM_DES3_MAC_GENERAL,	"DES3-MAC-GENERAL", NULL },
       { CKM_DES3_CBC_PAD,	"DES3-CBC-PAD", NULL },
+      { CKM_DES3_CMAC,		"DES3-CMAC", NULL },
       { CKM_CDMF_KEY_GEN,	"CDMF-KEY-GEN", NULL },
       { CKM_CDMF_ECB,		"CDMF-ECB", NULL },
       { CKM_CDMF_CBC,		"CDMF-CBC", NULL },
@@ -6230,13 +6235,24 @@ static struct mech_info	p11_mechanisms[] = {
       { CKM_AES_MAC,		"AES-MAC", NULL },
       { CKM_AES_MAC_GENERAL,	"AES-MAC-GENERAL", NULL },
       { CKM_AES_CBC_PAD,	"AES-CBC-PAD", NULL },
+      { CKM_AES_CTR,		"AES-CTR", NULL },
+      { CKM_AES_GCM,		"AES-GCM", NULL },
+      { CKM_AES_CMAC,		"AES-CMAC", NULL },
+      { CKM_DES_ECB_ENCRYPT_DATA, "DES-ECB-ENCRYPT-DATA", NULL },
+      { CKM_DES_CBC_ENCRYPT_DATA, "DES-CBC-ENCRYPT-DATA", NULL },
+      { CKM_DES3_ECB_ENCRYPT_DATA, "DES3-ECB-ENCRYPT-DATA", NULL },
+      { CKM_DES3_CBC_ENCRYPT_DATA, "DES3-CBC-ENCRYPT-DATA", NULL },
+      { CKM_AES_ECB_ENCRYPT_DATA, "AES-ECB-ENCRYPT-DATA", NULL },
+      { CKM_AES_CBC_ENCRYPT_DATA, "AES-CBC-ENCRYPT-DATA", NULL },
       { CKM_GOSTR3410_KEY_PAIR_GEN,"GOSTR3410-KEY-PAIR-GEN", NULL },
       { CKM_GOSTR3410,		"GOSTR3410", NULL },
       { CKM_GOSTR3410_WITH_GOSTR3411,"GOSTR3410-WITH-GOSTR3411", NULL },
       { CKM_GOSTR3411,		"GOSTR3411", NULL },
+      { CKM_GOSTR3411_HMAC,	"GOSTR3411-HMAC", NULL },
       { CKM_DSA_PARAMETER_GEN,	"DSA-PARAMETER-GEN", NULL },
       { CKM_DH_PKCS_PARAMETER_GEN,"DH-PKCS-PARAMETER-GEN", NULL },
       { CKM_X9_42_DH_PARAMETER_GEN,"X9-42-DH-PARAMETER-GEN", NULL },
+      { CKM_AES_KEY_WRAP,	"AES-KEY-WRAP", NULL},
       { 0, NULL, NULL }
 };
 

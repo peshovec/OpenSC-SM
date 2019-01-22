@@ -72,6 +72,8 @@ enum {
 	OPT_SO_PIN = 0x100,
 	OPT_PIN,
 	OPT_RETRY,
+	OPT_BIO1,
+	OPT_BIO2,
 	OPT_PASSWORD,
 	OPT_PASSWORD_SHARES_THRESHOLD,
 	OPT_PASSWORD_SHARES_TOTAL
@@ -90,6 +92,8 @@ static const struct option options[] = {
 	{ "so-pin",					1, NULL,		OPT_SO_PIN },
 	{ "pin",					1, NULL,		OPT_PIN },
 	{ "pin-retry",				1, NULL,		OPT_RETRY },
+	{ "bio-server1",			1, NULL,		OPT_BIO1 },
+	{ "bio-server2",			1, NULL,		OPT_BIO2 },
 	{ "password",				1, NULL,		OPT_PASSWORD },
 	{ "pwd-shares-threshold",	1, NULL,		OPT_PASSWORD_SHARES_THRESHOLD },
 	{ "pwd-shares-total",		1, NULL,		OPT_PASSWORD_SHARES_TOTAL },
@@ -115,6 +119,8 @@ static const char *option_help[] = {
 	"Define security officer PIN (SO-PIN)",
 	"Define user PIN",
 	"Define user PIN retry counter",
+	"AID of biometric server for template 1 (hex)",
+	"AID of biometric server for template 2 (hex)",
 	"Define password for DKEK share",
 	"Define threshold for number of password shares required for reconstruction",
 	"Define number of password shares",
@@ -130,9 +136,6 @@ typedef struct {
 	BIGNUM * x;
 	BIGNUM * y;
 } secret_share_t;
-
-static sc_context_t *ctx = NULL;
-static sc_card_t *card = NULL;
 
 
 
@@ -189,10 +192,10 @@ static void calculatePolynomialValue(const BIGNUM *x, BIGNUM **polynomial, const
 	BIGNUM *exponent;
 
 	unsigned long exp;
-	BN_CTX *ctx;
+	BN_CTX *bn_ctx;
 
 	// Create context for temporary variables of OpenSSL engine
-	ctx = BN_CTX_new();
+	bn_ctx = BN_CTX_new();
 
 	temp = BN_new();
 	exponent = BN_new();
@@ -212,19 +215,19 @@ static void calculatePolynomialValue(const BIGNUM *x, BIGNUM **polynomial, const
 
 		BN_set_word(exponent, exp);
 		// temp = x^exponent mod prime
-		BN_mod_exp(temp, x, exponent, prime, ctx);
+		BN_mod_exp(temp, x, exponent, prime, bn_ctx);
 		// exponent = temp * a = a * x^exponent mod prime
-		BN_mod_mul(exponent, temp, *pp, prime, ctx);
+		BN_mod_mul(exponent, temp, *pp, prime, bn_ctx);
 		// add the temp value from exponent to y
 		BN_copy(temp, y);
-		BN_mod_add(y, temp, exponent, prime, ctx);
+		BN_mod_add(y, temp, exponent, prime, bn_ctx);
 		pp++;
 	}
 
 	BN_clear_free(temp);
 	BN_clear_free(exponent);
 
-	BN_CTX_free(ctx);
+	BN_CTX_free(bn_ctx);
 }
 
 
@@ -558,7 +561,7 @@ static void print_info(sc_card_t *card, sc_file_t *file)
 
 
 
-static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, int retry_counter, int dkek_shares, const char *label)
+static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, int retry_counter, const char *bio1, const char *bio2, int dkek_shares, const char *label)
 {
 	sc_cardctl_sc_hsm_init_param_t param;
 	size_t len;
@@ -624,8 +627,32 @@ static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin,
 
 	param.user_pin_retry_counter = (u8)retry_counter;
 
+	if (bio1) {
+		param.bio1.len = sizeof(param.bio1.value);
+		r = sc_hex_to_bin(bio1, param.bio1.value, &param.bio1.len);
+		if (r < 0) {
+			fprintf(stderr, "Error decoding AID of biometric server for template 1 (%s)\n", sc_strerror(r));
+			return -1;
+		}
+	} else {
+		param.bio1.len = 0;
+	}
+	if (bio2) {
+		param.bio2.len = sizeof(param.bio2.value);
+		r = sc_hex_to_bin(bio2, param.bio2.value, &param.bio2.len);
+		if (r < 0) {
+			fprintf(stderr, "Error decoding AID of biometric server for template 2 (%s)\n", sc_strerror(r));
+			return -1;
+		}
+	} else {
+		param.bio2.len = 0;
+	}
+
 	param.options[0] = 0x00;
-	param.options[1] = 0x01;
+	param.options[1] = 0x01; /* RESET RETRY COUNTER enabled */
+	if (param.bio1.len || param.bio2.len) {
+		param.options[1] |= 0x04; /* Session-PIN enabled with clear on reset */
+	}
 
 	param.dkek_shares = (char)dkek_shares;
 	param.label = (char *)label;
@@ -754,7 +781,7 @@ static int recreate_password_from_shares(char **pwd, int *pwdlen, int num_of_pas
 static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const char *password, int num_of_password_shares)
 {
 	sc_cardctl_sc_hsm_dkek_t dkekinfo;
-	EVP_CIPHER_CTX *ctx = NULL;
+	EVP_CIPHER_CTX *bn_ctx = NULL;
 	FILE *in = NULL;
 	u8 filebuff[64],key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH],outbuff[64];
 	char *pwd = NULL;
@@ -812,14 +839,14 @@ static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const c
 		free(pwd);
 	}
 
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-	if (!EVP_DecryptUpdate(ctx, outbuff, &outlen, filebuff + 16, sizeof(filebuff) - 16)) {
+	bn_ctx = EVP_CIPHER_CTX_new();
+	EVP_DecryptInit_ex(bn_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+	if (!EVP_DecryptUpdate(bn_ctx, outbuff, &outlen, filebuff + 16, sizeof(filebuff) - 16)) {
 		fprintf(stderr, "Error decrypting DKEK share. Password correct ?\n");
 		return -1;
 	}
 
-	if (!EVP_DecryptFinal_ex(ctx, outbuff + outlen, &r)) {
+	if (!EVP_DecryptFinal_ex(bn_ctx, outbuff + outlen, &r)) {
 		fprintf(stderr, "Error decrypting DKEK share. Password correct ?\n");
 		return -1;
 	}
@@ -833,7 +860,7 @@ static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const c
 	r = sc_card_ctl(card, SC_CARDCTL_SC_HSM_IMPORT_DKEK_SHARE, (void *)&dkekinfo);
 
 	OPENSSL_cleanse(&dkekinfo.dkek_share, sizeof(dkekinfo.dkek_share));
-	EVP_CIPHER_CTX_free(ctx);
+	EVP_CIPHER_CTX_free(bn_ctx);
 
 	if (r == SC_ERROR_INS_NOT_SUPPORTED) {			// Not supported or not initialized for key shares
 		fprintf(stderr, "Not supported by card or card not initialized for key share usage\n");
@@ -854,7 +881,7 @@ static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const ch
 	// hex output can be used in the SCSH shell with the 
 	// decrypt_keyblob.js file
 	sc_cardctl_sc_hsm_dkek_t dkekinfo;
-	EVP_CIPHER_CTX *ctx = NULL;
+	EVP_CIPHER_CTX *bn_ctx = NULL;
 	FILE *in = NULL;
 	u8 filebuff[64],key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH],outbuff[64];
 	char *pwd = NULL;
@@ -913,14 +940,14 @@ static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const ch
 		free(pwd);
 	}
 
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-	if (!EVP_DecryptUpdate(ctx, outbuff, &outlen, filebuff + 16, sizeof(filebuff) - 16)) {
+	bn_ctx = EVP_CIPHER_CTX_new();
+	EVP_DecryptInit_ex(bn_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+	if (!EVP_DecryptUpdate(bn_ctx, outbuff, &outlen, filebuff + 16, sizeof(filebuff) - 16)) {
 		fprintf(stderr, "Error decrypting DKEK share. Password correct ?\n");
 		return -1;
 	}
 
-	if (!EVP_DecryptFinal_ex(ctx, outbuff + outlen, &r)) {
+	if (!EVP_DecryptFinal_ex(bn_ctx, outbuff + outlen, &r)) {
 		fprintf(stderr, "Error decrypting DKEK share. Password correct ?\n");
 		return -1;
 	}
@@ -940,7 +967,7 @@ static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const ch
 	printf("\n\n");
 
 	OPENSSL_cleanse(&dkekinfo.dkek_share, sizeof(dkekinfo.dkek_share));
-	EVP_CIPHER_CTX_free(ctx);
+	EVP_CIPHER_CTX_free(bn_ctx);
 
 	if (r == SC_ERROR_INS_NOT_SUPPORTED) {			// Not supported or not initialized for key shares
 		fprintf(stderr, "Not supported by card or card not initialized for key share usage\n");
@@ -1125,7 +1152,7 @@ static int generate_pwd_shares(sc_card_t *card, char **pwd, int *pwdlen, int pas
 
 static int create_dkek_share(sc_card_t *card, const char *outf, int iter, const char *password, int password_shares_threshold, int password_shares_total)
 {
-	EVP_CIPHER_CTX *ctx = NULL;
+	EVP_CIPHER_CTX *c_ctx = NULL;
 	FILE *out = NULL;
 	u8 filebuff[64], key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH];
 	u8 dkek_share[32];
@@ -1176,14 +1203,14 @@ static int create_dkek_share(sc_card_t *card, const char *outf, int iter, const 
 		return -1;
 	}
 
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-	if (!EVP_EncryptUpdate(ctx, filebuff + 16, &outlen, dkek_share, sizeof(dkek_share))) {
+	c_ctx = EVP_CIPHER_CTX_new();
+	EVP_EncryptInit_ex(c_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+	if (!EVP_EncryptUpdate(c_ctx, filebuff + 16, &outlen, dkek_share, sizeof(dkek_share))) {
 		fprintf(stderr, "Error encrypting DKEK share\n");
 		return -1;
 	}
 
-	if (!EVP_EncryptFinal_ex(ctx, filebuff + 16 + outlen, &r)) {
+	if (!EVP_EncryptFinal_ex(c_ctx, filebuff + 16 + outlen, &r)) {
 		fprintf(stderr, "Error encrypting DKEK share\n");
 		return -1;
 	}
@@ -1204,7 +1231,7 @@ static int create_dkek_share(sc_card_t *card, const char *outf, int iter, const 
 	fclose(out);
 
 	OPENSSL_cleanse(filebuff, sizeof(filebuff));
-	EVP_CIPHER_CTX_free(ctx);
+	EVP_CIPHER_CTX_free(c_ctx);
 
 	printf("DKEK share created and saved to %s\n", outf);
 	return 0;
@@ -1272,7 +1299,7 @@ static int wrap_with_tag(u8 tag, u8 *indata, size_t inlen, u8 **outdata, size_t 
 
 
 
-static int wrap_key(sc_card_t *card, int keyid, const char *outf, const char *pin)
+static int wrap_key(sc_context_t *ctx, sc_card_t *card, int keyid, const char *outf, const char *pin)
 {
 	sc_cardctl_sc_hsm_wrapped_key_t wrapped_key;
 	struct sc_pin_cmd_data data;
@@ -1666,6 +1693,8 @@ int main(int argc, char *argv[])
 	const char *opt_pin = NULL;
 	const char *opt_filename = NULL;
 	const char *opt_password = NULL;
+	const char *opt_bio1 = NULL;
+	const char *opt_bio2 = NULL;
 	int opt_retry_counter = 3;
 	int opt_dkek_shares = -1;
 	int opt_key_reference = -1;
@@ -1674,9 +1703,8 @@ int main(int argc, char *argv[])
 	int opt_force = 0;
 	int opt_iter = 10000000;
 	sc_context_param_t ctx_param;
-
-	setbuf(stderr, NULL);
-	setbuf(stdout, NULL);
+	sc_context_t *ctx = NULL;
+	sc_card_t *card = NULL;
 
 	while (1) {
 		c = getopt_long(argc, argv, "XC:I:P:W:U:s:i:fr:wv", options, &long_optind);
@@ -1725,6 +1753,12 @@ int main(int argc, char *argv[])
 			break;
 		case OPT_RETRY:
 			opt_retry_counter = atol(optarg);
+			break;
+		case OPT_BIO1:
+			opt_bio1 = optarg;
+			break;
+		case OPT_BIO2:
+			opt_bio2 = optarg;
 			break;
 		case OPT_PASSWORD_SHARES_THRESHOLD:
 			opt_password_shares_threshold = atol(optarg);
@@ -1776,12 +1810,6 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* Only change if not in opensc.conf */
-	if (verbose > 1 && ctx->debug == 0) {
-		ctx->debug = verbose;
-		sc_ctx_log_to_file(ctx, "stderr");
-	}
-
 	r = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0, verbose);
 	if (r != SC_SUCCESS) {
 		if (r < 0) {
@@ -1798,7 +1826,7 @@ int main(int argc, char *argv[])
 		goto fail;
 	}
 
-	if (do_initialize && initialize(card, opt_so_pin, opt_pin, opt_retry_counter, opt_dkek_shares, opt_label))
+	if (do_initialize && initialize(card, opt_so_pin, opt_pin, opt_retry_counter, opt_bio1, opt_bio2, opt_dkek_shares, opt_label))
 		goto fail;
 
 	if (do_create_dkek_share && create_dkek_share(card, opt_filename, opt_iter, opt_password, opt_password_shares_threshold, opt_password_shares_total))
@@ -1810,7 +1838,7 @@ int main(int argc, char *argv[])
 	if (do_print_dkek_share && print_dkek_share(card, opt_filename, opt_iter, opt_password, opt_password_shares_total))
 		goto fail;
 
-	if (do_wrap_key && wrap_key(card, opt_key_reference, opt_filename, opt_pin))
+	if (do_wrap_key && wrap_key(ctx, card, opt_key_reference, opt_filename, opt_pin))
 		goto fail;
 
 	if (do_unwrap_key && unwrap_key(card, opt_key_reference, opt_filename, opt_pin, opt_force))

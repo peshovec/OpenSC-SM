@@ -92,9 +92,6 @@ static const char *option_help[] = {
 	"Verbose operation. Use several times to enable debug output.",
 };
 
-static sc_context_t *ctx = NULL;
-static sc_card_t *card = NULL;
-
 static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, const char* serial)
 {
 	sc_cardctl_gids_init_param_t param;
@@ -479,9 +476,8 @@ int main(int argc, char * argv[])
 	const char *opt_serial_number = NULL;
 	const char *opt_new_key = NULL;
 	sc_context_param_t ctx_param;
-
-	setbuf(stderr, NULL);
-	setbuf(stdout, NULL);
+	sc_context_t *ctx = NULL;
+	sc_card_t *card = NULL;
 
 	while (1) {
 		c = getopt_long(argc, argv, "XUCr:wv", options, &long_optind);
@@ -551,12 +547,6 @@ int main(int argc, char * argv[])
 	if (r != SC_SUCCESS) {
 		fprintf(stderr, "Failed to establish context: %s\n", sc_strerror(r));
 		exit(1);
-	}
-
-	/* Only change if not in opensc.conf */
-	if (verbose > 1 && ctx->debug == 0) {
-		ctx->debug = verbose;
-		sc_ctx_log_to_file(ctx, "stderr");
 	}
 
 	r = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);

@@ -438,10 +438,10 @@ static int print_file(sc_card_t *in_card, const sc_file_t *file,
 		free(buf);
 	} else {
 		unsigned char buf[256];
-		int i;
+		size_t i;
 
 		for (i=0; i < file->record_count; i++) {
-			printf("Record %d\n", i);
+			printf("Record %"SC_FORMAT_LEN_SIZE_T"u\n", i);
 			r = sc_lock(card);
 			if (r == SC_SUCCESS)
 				r = sc_read_record(in_card, i, buf, 256, 0);
@@ -714,9 +714,6 @@ int main(int argc, char *argv[])
 	char **p;
 	sc_context_param_t ctx_param;
 
-	setbuf(stderr, NULL);
-	setbuf(stdout, NULL);
-
 	while (1) {
 		c = getopt_long(argc, argv, "inlG:S:fr:vs:Dc:aw", options, &long_optind);
 		if (c == -1)
@@ -828,11 +825,6 @@ int main(int argc, char *argv[])
 	}
 
 	ctx->flags |= SC_CTX_FLAG_ENABLE_DEFAULT_DRIVER;
-
-	if (verbose > 1) {
-		ctx->debug = verbose;
-		sc_ctx_log_to_file(ctx, "stderr");
-	}
 
 	if (do_get_conf_entry) {
 		if ((err = opensc_get_conf_entry (opt_conf_entry)))
